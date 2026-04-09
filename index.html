@@ -1076,13 +1076,24 @@ function saveLog(){
   .filter(s => s.weight !== '' || s.reps !== '');
   
   if(!sets.length){ toast('Mindestens 1 Satz!'); return; }
+  
   const oldPR=getPR(logId);
   if(!S.logs[logId]) S.logs[logId]=[];
-  S.logs[logId].push({date:new Date().toISOString(),sets});
+  
+  S.logs[logId].push({
+    date:new Date().toISOString(),
+    sets: sets
+  
+  });
+  
   const newPR=getPR(logId);
   S.stats.sets+=sets.length;
   updateStreak();
-  save(); closeLog(); renderExercises(); renderStats(); startRest();
+  save(); 
+  closeLog();
+  renderExercises();
+  renderStats();
+  startRest();
   toast(newPR>oldPR?'PR gebrochen! '+newPR+' kg 🔥':'Gespeichert!');
 }
 function updateStreak(){
