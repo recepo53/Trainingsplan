@@ -1098,7 +1098,7 @@ function saveLog(){
   const oldPR=getPR(logId);
   if(!S.logs[logId]) S.logs[logId]=[];
   
-  S.logs[logId] = S.logs[logId].filter(l => !1.date.starts.With(today));
+  S.logs[logId] = S.logs[logId].filter(l => !l.date.startsWith(today));
   sets.forEach(s => {
     S.logs[logId].push({date: new Date().toISOString(),sets: [s]});
     
