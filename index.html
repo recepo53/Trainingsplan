@@ -496,98 +496,103 @@ async function sbSet(data) {
 // ═══════════════════════════════════════════════
 // BACKGROUND TIMER (Web Worker via Blob)
 // ═══════════════════════════════════════════════
-const workerCode = `
-  let iv = null;
-  let sec = 0;
-  self.onmessage = function(e) {
-    if (e.data === 'start') {
-      if (iv) return;
-      iv = setInterval(() => { sec++; self.postMessage({type:'tick', sec}); }, 1000);
-    } else if (e.data === 'stop') {
-      clearInterval(iv); iv = null;
-    } else if (e.data === 'reset') {
-      clearInterval(iv); iv = null; sec = 0;
-    } else if (typeof e.data === 'object' && e.data.type === 'set') {
-      sec = e.data.sec;
-    }
-  };
-`;
-const workerBlob = new Blob([workerCode], {type:'application/javascript'});
-const timerWorker = new Worker(URL.createObjectURL(workerBlob));
+let startTime = null;
+let interval = null;
 let tmrOn = false;
-
-timerWorker.onmessage = function(e) {
-  if (e.data.type === 'tick') {
-    const s = e.data.sec;
-    const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), ss = s%60;
-    document.getElementById('timerDisp').textContent =
-      String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0');
-  }
-};
+let elapsed = 0;
 
 function timerStart() {
   if (tmrOn) return;
   tmrOn = true;
-  document.getElementById('btnStart').classList.add('on');
-  timerWorker.postMessage('start');
+
+  if (!startTime) {
+    startTime = Date.now();
+  } else {
+    startTime = Date.now() - elapsed * 1000;
+  }
+
+  interval = setInterval(updateTimer, 500);
 }
+
 function timerStop() {
   tmrOn = false;
-  document.getElementById('btnStart').classList.remove('on');
-  timerWorker.postMessage('stop');
+  clearInterval(interval);
 }
+
 function timerReset() {
   timerStop();
-  timerWorker.postMessage('reset');
+  startTime = null;
+  elapsed = 0;
   document.getElementById('timerDisp').textContent = '00:00:00';
+}
+
+function updateTimer() {
+  if (!startTime) return;
+
+  elapsed = Math.floor((Date.now() - startTime) / 1000);
+
+  const h = Math.floor(elapsed / 3600);
+  const m = Math.floor((elapsed % 3600) / 60);
+  const s = elapsed % 60;
+
+  document.getElementById('timerDisp').textContent =
+    String(h).padStart(2,'0') + ':' +
+    String(m).padStart(2,'0') + ':' +
+    String(s).padStart(2,'0');
 }
 
 // ═══════════════════════════════════════════════
 // BACKGROUND REST TIMER (Web Worker)
 // ═══════════════════════════════════════════════
-const restWorkerCode = `
-  let iv = null;
-  self.onmessage = function(e) {
-    if (e.data.type === 'start') {
-      clearInterval(iv);
-      let sec = e.data.sec;
-      const total = sec;
-      iv = setInterval(() => {
-        sec--;
-        self.postMessage({ sec, total });
-        if (sec <= 0) { clearInterval(iv); iv = null; }
-      }, 1000);
-    } else if (e.data === 'stop') {
-      clearInterval(iv); iv = null;
-    }
-  };
-`;
-const restBlob = new Blob([restWorkerCode], {type:'application/javascript'});
-const restWorker = new Worker(URL.createObjectURL(restBlob));
-let rstTotal = 120;
+let restEndTime = null;
+let restInterval = null;
+let restDuration = 120;
 
-restWorker.onmessage = function(e) {
-  const { sec, total } = e.data;
-  if (sec <= 0) {
+function startRest(sec = 120) {
+  restDuration = sec;
+  restEndTime = Date.now() + sec * 1000;
+
+  document.getElementById('restBar').classList.add('show');
+
+  clearInterval(restInterval);
+  restInterval = setInterval(updateRest, 500);
+}
+
+function updateRest() {
+  if (!restEndTime) return;
+
+  const remaining = Math.max(0, Math.floor((restEndTime - Date.now()) / 1000));
+
+  if (remaining <= 0) {
+    clearInterval(restInterval);
     document.getElementById('restBar').classList.remove('show');
     return;
   }
-  const m = Math.floor(sec/60), s = sec%60;
-  document.getElementById('restNum').textContent = m+':'+String(s).padStart(2,'0');
-  document.getElementById('restProgBar').style.width = (sec/total*100)+'%';
-};
 
-function startRest(sec=120) {
-  rstTotal = sec;
-  document.getElementById('restBar').classList.add('show');
-  document.getElementById('restNum').textContent = Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');
-  document.getElementById('restProgBar').style.width = '100%';
-  restWorker.postMessage({ type:'start', sec });
+  const m = Math.floor(remaining / 60);
+  const s = remaining % 60;
+
+  document.getElementById('restNum').textContent =
+    m + ':' + String(s).padStart(2,'0');
+
+  document.getElementById('restProgBar').style.width =
+    (remaining / restDuration * 100) + '%';
 }
+
 function restSkip() {
-  restWorker.postMessage('stop');
+  clearInterval(restInterval);
   document.getElementById('restBar').classList.remove('show');
 }
+
+  //NEW
+  
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    updateTimer();
+    updateRest();
+  }
+});
+  
 
 // ═══════════════════════════════════════════════
 // STATE
