@@ -1102,14 +1102,19 @@ function saveLog(){
 
   if(!S.logs[logId]) S.logs[logId] = [];
 
-  // ❗ Alte Logs vom heutigen Tag löschen
-  S.logs[logId] = S.logs[logId].filter(l => !l.date.startsWith(today));
+  // 🔥 suche ob heute schon ein Log existiert
+  let todayLog = S.logs[logId].find(l => l.date.startsWith(today));
 
-  // ❗ EIN Log mit ALLEN Sets speichern
-  S.logs[logId].push({
-    date: new Date().toISOString(),
-    sets: sets
-  });
+  if(todayLog){
+    // 👉 FALL 1: es gibt schon ein Log → neue Sets ANHÄNGEN
+    todayLog.sets.push(...sets);
+  } else {
+    // 👉 FALL 2: noch kein Log → neu erstellen
+    S.logs[logId].push({
+      date: new Date().toISOString(),
+      sets: sets
+    });
+  }
 
   const newPR = getPR(logId);
 
