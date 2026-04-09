@@ -1030,30 +1030,21 @@ function switchTab(t){
 // LOG
 // ═══════════════════════════════════════════════
 function openLog(id){
-  logId=id;
-  const k=DAYS[curDay].key;
-  const ex=(S.exercises[k]||[]).find(e=>e.id===id);
+  logId = id;
+
+  const k = DAYS[curDay].key;
+  const ex = (S.exercises[k]||[]).find(e=>e.id===id);
   if(!ex) return;
-  document.getElementById('logTtl').textContent=ex.name.length>20?ex.name.slice(0,18)+'…':ex.name.toUpperCase();
-  const rows=document.getElementById('setRows');
-  rows.innerHTML='';
-  const last=(S.logs[id]||[]).slice(-1)[0];
-  
-  let setsToCreate = parseInt(ex.sets) || 3;
-  
-  if (last && last.sets && last.sets.length > 0) {
-    // Erstelle genau so viele Zeilen wie ex.sets, fülle mit last-Werten wo vorhanden
-    for (let i = 0; i < setsToCreate; i++) {
-      const s = last.sets[i] || { weight: '', reps: '' };
-      addSetRow(s.weight || '', s.reps || '');
-    }
-  } else {
-    // Kein letzter Eintrag: Erstelle ex.sets leere Zeilen
-    for (let i = 0; i < setsToCreate; i++) {
-      addSetRow('', '');
-    }
-  }
-  
+
+  document.getElementById('logTtl').textContent =
+    ex.name.length>20 ? ex.name.slice(0,18)+'…' : ex.name.toUpperCase();
+
+  const rows = document.getElementById('setRows');
+  rows.innerHTML = '';
+
+  // 🔥 IMMER nur 1 leeres Set (für schnelles Logging im Gym)
+  addSetRow('', '');
+
   document.getElementById('logOv').classList.add('open');
 }
 
