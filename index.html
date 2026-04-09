@@ -1038,11 +1038,29 @@ function openLog(id){
   const rows=document.getElementById('setRows');
   rows.innerHTML='';
   const last=(S.logs[id]||[]).slice(-1)[0];
-  const sets=last?last.sets.map(s=>({w:s.weight||'',r:s.reps||''})):Array.from({length:ex.sets},()=>({w:'',r:''}));
-  sets.forEach(s=>addSetRow(s.w,s.r));
+  
+  let setsToCreate = parseInt(ex.sets) || 3;
+  
+  if (last && last.sets && last.sets.length > 0) {
+    // Erstelle genau so viele Zeilen wie ex.sets, fülle mit last-Werten wo vorhanden
+    for (let i = 0; i < setsToCreate; i++) {
+      const s = last.sets[i] || { weight: '', reps: '' };
+      addSetRow(s.weight || '', s.reps || '');
+    }
+  } else {
+    // Kein letzter Eintrag: Erstelle ex.sets leere Zeilen
+    for (let i = 0; i < setsToCreate; i++) {
+      addSetRow('', '');
+    }
+  }
+  
   document.getElementById('logOv').classList.add('open');
 }
-function closeLog(){ document.getElementById('logOv').classList.remove('open'); logId=null; }
+
+function closeLog(){ 
+  document.getElementById('logOv').classList.remove('open'); 
+  logId=null;
+}
 
 function addSetRow(w='',r=''){
   const rows=document.getElementById('setRows');
