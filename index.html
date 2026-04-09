@@ -1081,39 +1081,48 @@ function renum(){
 }
 function saveLog(){
   if(!logId) return;
- 
-  const rows=[...document.querySelectorAll('#setRows .set-row')];
-  
-  const sets=rows.map(r=>{
-    const ins=r.querySelectorAll('input'); 
-    return{
-      weight:ins[0].value.trim(),
-      reps:ins[1].value.trim()
+
+  const rows = [...document.querySelectorAll('#setRows .set-row')];
+
+  const sets = rows.map(r => {
+    const ins = r.querySelectorAll('input');
+    return {
+      weight: ins[0].value.trim(),
+      reps: ins[1].value.trim()
     };
-  })
-  .filter(s => s.weight !== '' || s.reps !== '');
-  
-  if(!sets.length){ toast('Mindestens 1 Satz!'); return; }
-  
-  const oldPR=getPR(logId);
-  if(!S.logs[logId]) S.logs[logId]=[];
-  
+  }).filter(s => s.weight !== '' || s.reps !== '');
+
+  if(!sets.length){
+    toast('Mindestens 1 Satz!');
+    return;
+  }
+
+  const today = getToday();
+  const oldPR = getPR(logId);
+
+  if(!S.logs[logId]) S.logs[logId] = [];
+
+  // ❗ Alte Logs vom heutigen Tag löschen
   S.logs[logId] = S.logs[logId].filter(l => !l.date.startsWith(today));
-  sets.forEach(s => {
-    S.logs[logId].push({date: new Date().toISOString(),sets: [s]});
-    
-  
+
+  // ❗ EIN Log mit ALLEN Sets speichern
+  S.logs[logId].push({
+    date: new Date().toISOString(),
+    sets: sets
   });
-  
-  const newPR=getPR(logId);
-  S.stats.sets+=sets.length;
+
+  const newPR = getPR(logId);
+
+  S.stats.sets += sets.length;
+
   updateStreak();
-  save(); 
+  save();
   closeLog();
   renderExercises();
   renderStats();
   startRest();
-  toast(newPR>oldPR?'PR gebrochen! '+newPR+' kg 🔥':'Gespeichert!');
+
+  toast(newPR > oldPR ? 'PR gebrochen! ' + newPR + ' kg 🔥' : 'Gespeichert!');
 }
 function updateStreak(){
   const today=getToday();
