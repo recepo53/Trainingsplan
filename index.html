@@ -315,6 +315,7 @@ svg.weight-chart{width:100%;overflow:visible;}
       <span class="day-badge c1" id="dayBadge">BRUST</span>
     </div>
     <button class="add-ex-btn" onclick="openAdd()">+ Übung</button>
+    <button class="add-ex-btn" id="clearSessionBtn" onclick="clearSession()" style="border-color:#e74c3c;color:#e74c3c;display:none">↺ Leeren</button>
   </div>
   <div class="ex-list" id="exList"></div>
 </div>
@@ -417,6 +418,10 @@ svg.weight-chart{width:100%;overflow:visible;}
     <div class="m-hdr"><div class="m-ttl" id="logTtl">LOG</div><button class="m-x" onclick="closeLog()">×</button></div>
     <div class="m-body">
       <div class="m-lbl" style="margin-bottom:8px">Gewicht (kg) & Wiederholungen</div>
+      <div id="logTodayStrip" style="display:none;margin-bottom:10px;padding:8px 10px;background:var(--bg3);border-radius:8px;border:1px solid var(--bg4);">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.15em;color:var(--grey);text-transform:uppercase;margin-bottom:5px;">Heute bereits geloggt</div>
+        <div id="logTodayChips" style="display:flex;flex-wrap:wrap;gap:5px;"></div>
+      </div>
       <div style="display:grid;grid-template-columns:28px 1fr 1fr 30px;gap:7px;margin-bottom:6px">
         <div></div><div class="set-hdr-lbl">kg</div><div class="set-hdr-lbl">Wdh.</div><div></div>
       </div>
@@ -534,7 +539,7 @@ function timerStop() {
 function timerReset() {
   timerStop();
   // Trainingszeit speichern wenn > 60 Sekunden
-  if (elapsed > 60) {
+  if (elapsed > 0) {
     const today = getToday();
     if (!S.workoutDurations) S.workoutDurations = {};
     // Längste Session des Tages behalten
@@ -545,6 +550,7 @@ function timerReset() {
   // Session-Reset-Zeitstempel setzen → Übungen werden zurückgesetzt
   S.sessionResetTime = new Date().toISOString();
   save();
+  if (curTab === 'p') renderProgress();
   startTime = null;
   elapsed = 0;
   document.getElementById('timerDisp').textContent = '00:00:00';
@@ -691,12 +697,39 @@ function setSyncStatus(status, text) {
 async function loadFromSupabase() {
   setSyncStatus('syncing', 'Lade Daten...');
   const remote = await sbGet();
+
+  // Lokales Backup lesen (kann neuer sein als Supabase wenn Debounce noch lief)
+  let local = null;
+  try { local = JSON.parse(localStorage.getItem('recep_backup') || 'null'); } catch(e) {}
+
   if (remote) {
     S = { ...S, ...remote };
     if (!S.weights) S.weights = [];
+
+    // Gewichte zusammenfuehren: lokale Eintraege gewinnen (neuere)
+    if (local && local.weights && local.weights.length) {
+      const wMap = new Map();
+      S.weights.forEach(w => wMap.set(w.date, w));
+      local.weights.forEach(w => wMap.set(w.date, w));
+      S.weights = [...wMap.values()].sort((a,b) => a.date.localeCompare(b.date));
+    }
+
+    // Logs zusammenfuehren: lokale Eintraege gewinnen (neuere)
+    if (local && local.logs) {
+      S.logs = S.logs || {};
+      Object.keys(local.logs).forEach(exId => {
+        if (!S.logs[exId]) S.logs[exId] = [];
+        const lMap = new Map();
+        S.logs[exId].forEach(l => lMap.set(l.date, l));
+        local.logs[exId].forEach(l => lMap.set(l.date, l));
+        S.logs[exId] = [...lMap.values()].sort((a,b) => a.date.localeCompare(b.date));
+      });
+    }
+
     setSyncStatus('ok', 'Synchronisiert');
+    save();
   } else {
-    setSyncStatus('ok', 'Bereit');
+    setSyncStatus('ok', 'Bereit (Offline)');
   }
   renderStats();
   selectDay(0);
@@ -715,6 +748,28 @@ function save() {
 // ═══════════════════════════════════════════════
 // RENDER EXERCISES
 // ═══════════════════════════════════════════════
+function deleteSet(exId, setIndex) {
+  const today = getToday();
+  const logs = S.logs[exId];
+  if (!logs) return;
+  const todayLog = logs.find(l => l.date === today);
+  if (!todayLog || !todayLog.sets) return;
+  todayLog.sets.splice(setIndex, 1);
+  if (todayLog.sets.length === 0) {
+    S.logs[exId] = logs.filter(l => l.date !== today);
+  }
+  save();
+  renderExercises();
+  toast('Satz gelöscht');
+}
+
+function clearSession() {
+  S.sessionResetTime = new Date().toISOString();
+  save();
+  renderExercises();
+  toast('Session geleert ✓');
+}
+
 function renderExercises() {
   const k = DAYS[curDay].key;
   const col = DAYS[curDay].cls;
@@ -722,16 +777,18 @@ function renderExercises() {
   const list = document.getElementById('exList');
 
   let doneCount = 0;
+  const sessionStart = S.sessionResetTime || '2000-01-01';
+  const today = getToday();
   DAYS.forEach(d => {
     (S.exercises[d.key]||[]).forEach(ex => {
-      const last = (S.logs[ex.id]||[]).slice(-1)[0];
-      if (last) {
-        const today = getToday();
-        if (last.date && last.date.startsWith(today)) doneCount++;
-      }
+      const logs = S.logs[ex.id]||[];
+      const activeLog = logs.find(l => l.date === today && l.updatedAt && l.updatedAt > sessionStart);
+      if (activeLog) doneCount++;
     });
   });
   document.getElementById('exCountVal').textContent = doneCount;
+  const clearBtn = document.getElementById('clearSessionBtn');
+  if (clearBtn) clearBtn.style.display = doneCount > 0 ? 'block' : 'none';
 
   if (!exs.length) { list.innerHTML='<div class="empty">Keine Übungen</div>'; return; }
 
@@ -742,16 +799,19 @@ function renderExercises() {
     const today = getToday();
     // Nur Logs nach dem letzten Reset (aktive Session) für Sterne zählen
     const sessionStart = S.sessionResetTime || '2000-01-01';
-    const activeLog = logs.find(l => l.date && l.date.startsWith(today) && l.date > sessionStart);
+    const activeLog = logs.find(l => l.date === today && l.updatedAt && l.updatedAt > sessionStart);
     const num = String(i+1).padStart(2,'0');
     const stars = Array.from({length:ex.sets},(_,j)=>`<div class="ex-star${j<(activeLog?activeLog.sets.length:0)?' lit':''}"></div>`).join('');
     let logStrip = '';
-    if (last && last.sets && last.sets.length) {
-      const chips = last.sets.map(s=>{
+    if (activeLog && activeLog.sets && activeLog.sets.length) {
+      const chips = activeLog.sets.map((s, si) => {
         const isPR = s.weight && parseFloat(s.weight)>=pr && pr>0;
-        return `<span class="set-chip${isPR?' pr':''}">${s.weight?s.weight+'kg':'—'} × ${s.reps||'—'}</span>`;
+        return `<span class="set-chip${isPR?' pr':''}" style="display:inline-flex;align-items:center;gap:3px;">
+          ${s.weight?s.weight+'kg':'—'} × ${s.reps||'—'}
+          <button onclick="deleteSet('${ex.id}',${si})" style="background:none;border:none;color:var(--grey2);cursor:pointer;font-size:14px;line-height:1;padding:0 0 0 1px;" title="Satz löschen">×</button>
+        </span>`;
       }).join('');
-      logStrip = `<div class="ex-log-strip"><span class="ex-log-date">${fmtDate(last.date)}</span>${chips}</div>`;
+      logStrip = `<div class="ex-log-strip"><span class="ex-log-date">${fmtDate(activeLog.date)}</span>${chips}</div>`;
     }
     return `
       <div class="ex-row ${col}${pr>0?' pr-row':''}">
@@ -788,7 +848,7 @@ function renderProgress() {
   renderWeek();
   renderTrainingHistory();
   document.getElementById('sbTrainings').textContent = S.stats.trainings;
-  document.getElementById('sbSets').textContent = S.stats.sets;
+  document.getElementById('sbSets').textContent = getSessionSets();
   document.getElementById('sbStreak').textContent = S.streak.cur;
   document.getElementById('sbBest').textContent = S.streak.best;
   const all = [];
@@ -813,7 +873,7 @@ function renderProgress() {
           <div><div class="prog-ex-name">${ex.name}</div><div class="prog-ex-day" style="color:var(--${dc.cls})">${dc.title}</div></div>
           <div class="prog-ex-pr">${pr>0?pr+' kg PR':'—'}</div>
         </div>
-        <div class="prog-ex-hist" id="h${ex.id}">${rows}</div>
+        <div class="prog-ex-hist open" id="h${ex.id}">${rows}</div>
       </div>`;
   }).join('');
 }
@@ -860,18 +920,29 @@ function renderTrainingHistory() {
     const durStr = sec > 0 ? fmtDur(sec) : '—';
 
     // Übungen und Sets für diesen Tag sammeln
+// Übungen und Sets für diesen Tag sammeln
     let setsOnDay = 0;
-    const exOnDay = [];
+    const exMap = {}; // Map zum sauberen Gruppieren der Übungen
+
     Object.entries(S.logs).forEach(([exId, logArr]) => {
       logArr.forEach(l => {
+        // Prüfen, ob das Log zum aktuellen Datum (dateStr) gehört
         if (l.date && l.date.startsWith(dateStr)) {
-          const cnt = (l.sets||[]).length;
-          setsOnDay += cnt;
-          const name = exNameMap[exId] || '—';
-          exOnDay.push({ name, cnt });
+          const cnt = (l.sets || []).length;
+          if (cnt > 0) { // Nur berücksichtigen, wenn auch Sets gemacht wurden
+            setsOnDay += cnt;
+            const name = exNameMap[exId] || '—';
+            
+            // Sets zusammenrechnen, falls die Übung mehrfach geloggt wurde
+            if (!exMap[name]) exMap[name] = 0;
+            exMap[name] += cnt; 
+          }
         }
       });
     });
+
+    // Aus der Map wieder ein Array für die Anzeige machen
+    const exOnDay = Object.keys(exMap).map(name => ({ name, cnt: exMap[name] }));
 
     const exChips = exOnDay.length
       ? `<div class="train-day-exs">${exOnDay.map(e =>
@@ -916,7 +987,10 @@ function saveWeight() {
   if (existing >= 0) { S.weights[existing].kg = val; }
   else { S.weights.push({ date: today, kg: val }); }
   S.weights.sort((a,b)=>a.date.localeCompare(b.date));
-  save();
+  // Sofort zu Supabase speichern (kein Debounce) damit Reload sicher klappt
+  localStorage.setItem('recep_backup', JSON.stringify(S));
+  setSyncStatus('syncing', 'Speichert...');
+  sbSet(S).then(() => setSyncStatus('ok', 'Gespeichert \u2713'));
   inp.value = '';
   renderWeight();
   toast('Gewicht gespeichert!');
@@ -1086,7 +1160,22 @@ function getPR(id){
   }));
   return m;
 }
-function getToday(){ return new Date().toISOString().split('T')[0]; }
+function getSessionSets() {
+  const sessionStart = S.sessionResetTime || '2000-01-01';
+  let total = 0;
+  Object.values(S.logs).forEach(logArr => {
+    logArr.forEach(log => {
+      // Nur Logs, die nach dem letzten Reset erstellt/geändert wurden
+      if (log.updatedAt && log.updatedAt > sessionStart) {
+        total += (log.sets || []).length;
+      }
+    });
+  });
+  return total;
+}
+
+function getToday(){ 
+  return new Date().toISOString().split('T')[0]; }
 function fmtDate(iso){
   if(!iso) return '—';
   const d=new Date(iso);
@@ -1143,8 +1232,47 @@ function openLog(id){
   const rows = document.getElementById('setRows');
   rows.innerHTML = '';
 
-  // 🔥 IMMER nur 1 leeres Set (für schnelles Logging im Gym)
-  addSetRow('', '');
+  const today = getToday();
+  const sessionStart = S.sessionResetTime || '2000-01-01';
+  const allLogs = S.logs[id] || [];
+  const todayLog = allLogs.find(l => l.date === today);
+
+  // Nur Sets der aktuellen Session (nach letztem Reset)
+  const activeSessionSets = todayLog && todayLog.sets
+    ? todayLog.sets.filter((s, i) => {
+        // sets haben keinen eigenen Timestamp → wenn updatedAt nach Reset: alle gültig
+        return todayLog.updatedAt && todayLog.updatedAt > sessionStart;
+      })
+    : [];
+
+  // "Heute bereits geloggt" Strip – nur Sets nach letztem Reset zeigen
+  const todayStrip = document.getElementById('logTodayStrip');
+  const todayChips = document.getElementById('logTodayChips');
+  if (activeSessionSets.length) {
+    todayChips.innerHTML = activeSessionSets.map((s,i) =>
+      `<span class="set-chip">S${i+1} ${s.weight?s.weight+'kg':'—'} × ${s.reps||'—'}</span>`
+    ).join('');
+    todayStrip.style.display = 'block';
+  } else {
+    todayStrip.style.display = 'none';
+  }
+
+  // KG vorausfüllen: letztes verwendetes Gewicht (aus aktiver Session oder vorherigem Training)
+  let prefillWeight = '';
+  if (activeSessionSets.length) {
+    prefillWeight = activeSessionSets[activeSessionSets.length - 1].weight || '';
+  } else {
+    // Letztes Training (nicht heute) als Referenz
+    const prevLog = allLogs.slice().reverse().find(l => l.date !== today);
+    if (prevLog && prevLog.sets && prevLog.sets.length) {
+      prefillWeight = prevLog.sets[prevLog.sets.length - 1].weight || '';
+    } else if (todayLog && todayLog.sets && todayLog.sets.length) {
+      // Fallback: Heute (vor Reset) – nur Gewicht
+      prefillWeight = todayLog.sets[todayLog.sets.length - 1].weight || '';
+    }
+  }
+
+  addSetRow(prefillWeight, '');  // KG vorausgefüllt, Wdh. leer (muss selbst eingetragen werden)
 
   document.getElementById('logOv').classList.add('open');
 }
@@ -1191,21 +1319,24 @@ function saveLog(){
 
   const today = getToday();
   const oldPR = getPR(logId);
+  const now = new Date();
+  const nowISO = now.toISOString(); // UTC, konsistent mit sessionResetTime
 
   if(!S.logs[logId]) S.logs[logId] = [];
 
-  // 🔥 suche ob heute schon ein Log existiert
-  let todayLog = S.logs[logId].find(l => l.date.startsWith(today));
-
+  let todayLog = S.logs[logId].find(l => l.date && l.date.startsWith(today));
   if(todayLog){
-    // 👉 FALL 1: es gibt schon ein Log → neue Sets ANHÄNGEN
     todayLog.sets.push(...sets);
+    todayLog.updatedAt = nowISO;
   } else {
-    // 👉 FALL 2: noch kein Log → neu erstellen
     S.logs[logId].push({
-      date: new Date().toISOString(),
+      date: today,
+      updatedAt: nowISO,
       sets: sets
     });
+  }
+  if (!S.streak.dates.includes(today)) {
+    S.streak.dates.push(today);
   }
 
   const newPR = getPR(logId);
@@ -1214,6 +1345,7 @@ function saveLog(){
 
   updateStreak();
   save();
+  if (curTab === 'p') renderProgress();
   closeLog();
   renderExercises();
   renderStats();
