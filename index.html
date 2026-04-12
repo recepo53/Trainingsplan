@@ -726,6 +726,28 @@ async function loadFromSupabase() {
       });
     }
 
+    // Exercises zusammenfuehren: lokale gewinnen (neuere)
+    if (local && local.exercises) {
+      S.exercises = S.exercises || {};
+      Object.keys(local.exercises).forEach(dayKey => {
+        if (!S.exercises[dayKey]) {
+          S.exercises[dayKey] = local.exercises[dayKey];
+          return;
+        }
+        const remoteIds = new Set(S.exercises[dayKey].map(e => e.id));
+        local.exercises[dayKey].forEach(ex => {
+          if (remoteIds.has(ex.id)) {
+            // Bestehendes updaten (lokale Version gewinnt)
+            const idx = S.exercises[dayKey].findIndex(e => e.id === ex.id);
+            S.exercises[dayKey][idx] = ex;
+          } else {
+            // Neue lokale Übung hinzufügen
+            S.exercises[dayKey].push(ex);
+          }
+        });
+      });
+    }
+
     setSyncStatus('ok', 'Synchronisiert');
     save();
   } else {
