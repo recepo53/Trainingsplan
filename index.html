@@ -315,7 +315,6 @@ svg.weight-chart{width:100%;overflow:visible;}
       <span class="day-badge c1" id="dayBadge">BRUST</span>
     </div>
     <button class="add-ex-btn" onclick="openAdd()">+ Übung</button>
-    <button class="add-ex-btn" id="clearSessionBtn" onclick="clearSession()" style="border-color:#e74c3c;color:#e74c3c;display:none">↺ Leeren</button>
   </div>
   <div class="ex-list" id="exList"></div>
 </div>
@@ -539,7 +538,7 @@ function timerStop() {
 function timerReset() {
   timerStop();
   // Trainingszeit speichern wenn > 60 Sekunden
-  if (elapsed > 0) {
+  if (elapsed > 60) {
     const today = getToday();
     if (!S.workoutDurations) S.workoutDurations = {};
     // Längste Session des Tages behalten
@@ -726,28 +725,6 @@ async function loadFromSupabase() {
       });
     }
 
-    // Exercises zusammenfuehren: lokale gewinnen (neuere)
-    if (local && local.exercises) {
-      S.exercises = S.exercises || {};
-      Object.keys(local.exercises).forEach(dayKey => {
-        if (!S.exercises[dayKey]) {
-          S.exercises[dayKey] = local.exercises[dayKey];
-          return;
-        }
-        const remoteIds = new Set(S.exercises[dayKey].map(e => e.id));
-        local.exercises[dayKey].forEach(ex => {
-          if (remoteIds.has(ex.id)) {
-            // Bestehendes updaten (lokale Version gewinnt)
-            const idx = S.exercises[dayKey].findIndex(e => e.id === ex.id);
-            S.exercises[dayKey][idx] = ex;
-          } else {
-            // Neue lokale Übung hinzufügen
-            S.exercises[dayKey].push(ex);
-          }
-        });
-      });
-    }
-
     setSyncStatus('ok', 'Synchronisiert');
     save();
   } else {
@@ -770,28 +747,6 @@ function save() {
 // ═══════════════════════════════════════════════
 // RENDER EXERCISES
 // ═══════════════════════════════════════════════
-function deleteSet(exId, setIndex) {
-  const today = getToday();
-  const logs = S.logs[exId];
-  if (!logs) return;
-  const todayLog = logs.find(l => l.date === today);
-  if (!todayLog || !todayLog.sets) return;
-  todayLog.sets.splice(setIndex, 1);
-  if (todayLog.sets.length === 0) {
-    S.logs[exId] = logs.filter(l => l.date !== today);
-  }
-  save();
-  renderExercises();
-  toast('Satz gelöscht');
-}
-
-function clearSession() {
-  S.sessionResetTime = new Date().toISOString();
-  save();
-  renderExercises();
-  toast('Session geleert ✓');
-}
-
 function renderExercises() {
   const k = DAYS[curDay].key;
   const col = DAYS[curDay].cls;
@@ -799,18 +754,16 @@ function renderExercises() {
   const list = document.getElementById('exList');
 
   let doneCount = 0;
-  const sessionStart = S.sessionResetTime || '2000-01-01';
-  const today = getToday();
   DAYS.forEach(d => {
     (S.exercises[d.key]||[]).forEach(ex => {
-      const logs = S.logs[ex.id]||[];
-      const activeLog = logs.find(l => l.date === today && l.updatedAt && l.updatedAt > sessionStart);
-      if (activeLog) doneCount++;
+      const last = (S.logs[ex.id]||[]).slice(-1)[0];
+      if (last) {
+        const today = getToday();
+        if (last.date && last.date.startsWith(today)) doneCount++;
+      }
     });
   });
   document.getElementById('exCountVal').textContent = doneCount;
-  const clearBtn = document.getElementById('clearSessionBtn');
-  if (clearBtn) clearBtn.style.display = doneCount > 0 ? 'block' : 'none';
 
   if (!exs.length) { list.innerHTML='<div class="empty">Keine Übungen</div>'; return; }
 
@@ -825,15 +778,12 @@ function renderExercises() {
     const num = String(i+1).padStart(2,'0');
     const stars = Array.from({length:ex.sets},(_,j)=>`<div class="ex-star${j<(activeLog?activeLog.sets.length:0)?' lit':''}"></div>`).join('');
     let logStrip = '';
-    if (activeLog && activeLog.sets && activeLog.sets.length) {
-      const chips = activeLog.sets.map((s, si) => {
+    if (last && last.sets && last.sets.length) {
+      const chips = last.sets.map(s=>{
         const isPR = s.weight && parseFloat(s.weight)>=pr && pr>0;
-        return `<span class="set-chip${isPR?' pr':''}" style="display:inline-flex;align-items:center;gap:3px;">
-          ${s.weight?s.weight+'kg':'—'} × ${s.reps||'—'}
-          <button onclick="deleteSet('${ex.id}',${si})" style="background:none;border:none;color:var(--grey2);cursor:pointer;font-size:14px;line-height:1;padding:0 0 0 1px;" title="Satz löschen">×</button>
-        </span>`;
+        return `<span class="set-chip${isPR?' pr':''}">${s.weight?s.weight+'kg':'—'} × ${s.reps||'—'}</span>`;
       }).join('');
-      logStrip = `<div class="ex-log-strip"><span class="ex-log-date">${fmtDate(activeLog.date)}</span>${chips}</div>`;
+      logStrip = `<div class="ex-log-strip"><span class="ex-log-date">${fmtDate(last.date)}</span>${chips}</div>`;
     }
     return `
       <div class="ex-row ${col}${pr>0?' pr-row':''}">
@@ -1254,24 +1204,29 @@ function openLog(id){
   const rows = document.getElementById('setRows');
   rows.innerHTML = '';
 
+  // Letztes Gewicht & Wiederholungen vorausfüllen (heute → sonst letztes Training)
   const today = getToday();
-  const sessionStart = S.sessionResetTime || '2000-01-01';
-  const allLogs = S.logs[id] || [];
-  const todayLog = allLogs.find(l => l.date === today);
+  const existingLogs = S.logs[id] || [];
+  const todayLog = existingLogs.find(l => l.date === today);
+  const lastLog = existingLogs.slice(-1)[0];
 
-  // Nur Sets der aktuellen Session (nach letztem Reset)
-  const activeSessionSets = todayLog && todayLog.sets
-    ? todayLog.sets.filter((s, i) => {
-        // sets haben keinen eigenen Timestamp → wenn updatedAt nach Reset: alle gültig
-        return todayLog.updatedAt && todayLog.updatedAt > sessionStart;
-      })
-    : [];
+  let prefillWeight = '';
+  let prefillReps = '';
+  if (todayLog && todayLog.sets && todayLog.sets.length) {
+    const lastSet = todayLog.sets[todayLog.sets.length - 1];
+    prefillWeight = lastSet.weight || '';
+    prefillReps   = lastSet.reps   || '';
+  } else if (lastLog && lastLog.sets && lastLog.sets.length) {
+    const lastSet = lastLog.sets[lastLog.sets.length - 1];
+    prefillWeight = lastSet.weight || '';
+    prefillReps   = lastSet.reps   || '';
+  }
 
-  // "Heute bereits geloggt" Strip – nur Sets nach letztem Reset zeigen
-  const todayStrip = document.getElementById('logTodayStrip');
-  const todayChips = document.getElementById('logTodayChips');
-  if (activeSessionSets.length) {
-    todayChips.innerHTML = activeSessionSets.map((s,i) =>
+  // Heute bereits geloggte Sets als Referenz anzeigen
+  const todayStrip  = document.getElementById('logTodayStrip');
+  const todayChips  = document.getElementById('logTodayChips');
+  if (todayLog && todayLog.sets && todayLog.sets.length) {
+    todayChips.innerHTML = todayLog.sets.map((s,i) =>
       `<span class="set-chip">S${i+1} ${s.weight?s.weight+'kg':'—'} × ${s.reps||'—'}</span>`
     ).join('');
     todayStrip.style.display = 'block';
@@ -1279,22 +1234,7 @@ function openLog(id){
     todayStrip.style.display = 'none';
   }
 
-  // KG vorausfüllen: letztes verwendetes Gewicht (aus aktiver Session oder vorherigem Training)
-  let prefillWeight = '';
-  if (activeSessionSets.length) {
-    prefillWeight = activeSessionSets[activeSessionSets.length - 1].weight || '';
-  } else {
-    // Letztes Training (nicht heute) als Referenz
-    const prevLog = allLogs.slice().reverse().find(l => l.date !== today);
-    if (prevLog && prevLog.sets && prevLog.sets.length) {
-      prefillWeight = prevLog.sets[prevLog.sets.length - 1].weight || '';
-    } else if (todayLog && todayLog.sets && todayLog.sets.length) {
-      // Fallback: Heute (vor Reset) – nur Gewicht
-      prefillWeight = todayLog.sets[todayLog.sets.length - 1].weight || '';
-    }
-  }
-
-  addSetRow(prefillWeight, '');  // KG vorausgefüllt, Wdh. leer (muss selbst eingetragen werden)
+  addSetRow(prefillWeight, prefillReps);
 
   document.getElementById('logOv').classList.add('open');
 }
@@ -1342,18 +1282,25 @@ function saveLog(){
   const today = getToday();
   const oldPR = getPR(logId);
   const now = new Date();
-  const nowISO = now.toISOString(); // UTC, konsistent mit sessionResetTime
+  const timeString = now.toTimeString().split(' ')[0];
+
 
   if(!S.logs[logId]) S.logs[logId] = [];
 
+  // 🔥 suche ob heute schon ein Log existiertf
   let todayLog = S.logs[logId].find(l => l.date && l.date.startsWith(today));
-  if(todayLog){
+if(todayLog){
+    // 👉 FALL 1: es gibt schon ein Log → neue Sets ANHÄNGEN
     todayLog.sets.push(...sets);
-    todayLog.updatedAt = nowISO;
+    todayLog.updatedAt = today + 'T' + timeString;
   } else {
+    // 👉 FALL 2: noch kein Log → neu erstellen
+    // Wir bauen den Zeitstempel manuell mit getToday(), damit es 100% matcht
+ // z.B. "14:30:00"
+
     S.logs[logId].push({
       date: today,
-      updatedAt: nowISO,
+      updatedAt: today + 'T' + timeString, // Kombiniert lokales Datum + lokale Uhrzeit
       sets: sets
     });
   }
