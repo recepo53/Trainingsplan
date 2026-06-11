@@ -546,29 +546,43 @@ async function sbRefresh(){
 function sbLogout(){ clearSession(); location.reload(); }
 
 // ── Daten lesen / schreiben (nur mit Login) ──────
+// ── Daten lesen / schreiben (nur mit Login) ──────
+// Fetch mit automatischem Login-Refresh, falls der Token abgelaufen ist (401)
+async function sbFetch(path, options = {}, retry = true) {
+  if(!SESSION) throw new Error('no session');
+  const headers = Object.assign({
+    'apikey': SB_KEY,
+    'Authorization': 'Bearer ' + SESSION.access_token
+  }, options.headers || {});
+  const r = await fetch(`${SB_URL}${path}`, Object.assign({}, options, { headers }));
+  if(r.status === 401 && retry){
+    const s = await sbRefresh();
+    if(s) return sbFetch(path, options, false);
+  }
+  return r;
+}
+
 async function sbGet() {
   if(!SESSION) return null;
   try {
-    const r = await fetch(`${SB_URL}/rest/v1/trainingsplan?user_id=eq.${SESSION.user_id}&select=data&order=updated_at.desc&limit=1`, {
-      headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SESSION.access_token }
-    });
+    const r = await sbFetch(`/rest/v1/trainingsplan?user_id=eq.${SESSION.user_id}&select=data&order=updated_at.desc&limit=1`);
+    if(!r.ok) return null;
     const d = await r.json();
     return Array.isArray(d) && d[0] ? d[0].data : null;
   } catch(e) { return null; }
 }
 
+// Gibt true zurueck, wenn das Speichern in die Cloud geklappt hat, sonst false
 async function sbSet(data) {
-  if(!SESSION) return;
+  if(!SESSION) return false;
   try {
-    await fetch(`${SB_URL}/rest/v1/trainingsplan?on_conflict=user_id`, {
+    const r = await sbFetch(`/rest/v1/trainingsplan?on_conflict=user_id`, {
       method: 'POST',
-      headers: {
-        'apikey': SB_KEY, 'Authorization': 'Bearer ' + SESSION.access_token,
-        'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates'
-      },
+      headers: { 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' },
       body: JSON.stringify({ user_id: SESSION.user_id, data, updated_at: new Date().toISOString() })
     });
-  } catch(e) {}
+    return r.ok;
+  } catch(e) { return false; }
 }
 
 // ═══════════════════════════════════════════════
@@ -801,8 +815,8 @@ function save() {
   setSyncStatus('syncing', 'Speichert...');
   clearTimeout(syncTimer);
   syncTimer = setTimeout(async () => {
-    await sbSet(S);
-    setSyncStatus('ok', 'Gespeichert ✓');
+    const ok = await sbSet(S);
+    setSyncStatus(ok ? 'ok' : 'err', ok ? 'Gespeichert ✓' : 'Nur lokal gespeichert');
   }, 1000);
 }
 
@@ -1024,7 +1038,7 @@ function saveWeight() {
   // Sofort zu Supabase speichern (kein Debounce) damit Reload sicher klappt
   localStorage.setItem('recep_backup', JSON.stringify(S));
   setSyncStatus('syncing', 'Speichert...');
-  sbSet(S).then(() => setSyncStatus('ok', 'Gespeichert \u2713'));
+  sbSet(S).then(ok => setSyncStatus(ok ? 'ok' : 'err', ok ? 'Gespeichert \u2713' : 'Nur lokal gespeichert'));
   inp.value = '';
   renderWeight();
   toast('Gewicht gespeichert!');
