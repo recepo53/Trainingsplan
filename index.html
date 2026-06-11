@@ -1523,10 +1523,17 @@ document.getElementById('loginBtn').addEventListener('click', doLogin);
 document.getElementById('loginPass').addEventListener('keydown', function(e){ if(e.key==='Enter') doLogin(); });
 
 // Beim Start: bestehende Sitzung wiederherstellen
+// Beim Start: gespeicherte Sitzung sofort nutzen (auch offline), Login nur im Hintergrund erneuern
 (async function boot(){
-  const s = await sbRefresh();
-  if(s){ showApp(); loadFromSupabase(); }
-  else { showLogin(); }
+  const stored = loadSession();
+  if(stored && stored.user_id){
+    SESSION = stored;        // sofort eingeloggt starten, auch ohne Netz
+    showApp();
+    loadFromSupabase();      // synct wenn online; offline bleiben die lokalen Daten
+    sbRefresh();             // Token im Hintergrund auffrischen, wenn Netz da ist
+  } else {
+    showLogin();
+  }
 })();
 
 // ═══════════════════════════════════════════════
