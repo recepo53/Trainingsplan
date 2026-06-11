@@ -240,6 +240,17 @@ svg.weight-chart{width:100%;overflow:visible;}
 .conf-ov{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:600;display:none;align-items:center;justify-content:center;padding:20px;}
 .conf-ov.open{display:flex;}
 .conf-box{background:#1a1a1a;border:1px solid var(--bg4);border-radius:16px;padding:28px 24px;width:100%;max-width:360px;text-align:center;}
+.login-ov{position:fixed;inset:0;background:var(--bg);z-index:1000;display:none;align-items:center;justify-content:center;padding:24px;}
+.login-box{width:100%;max-width:340px;text-align:center;}
+.login-logo{font-family:'Anton',sans-serif;font-size:56px;color:var(--lime);line-height:1;letter-spacing:.04em;}
+.login-sub{font-size:11px;letter-spacing:.2em;color:var(--grey);text-transform:uppercase;margin:6px 0 28px;}
+.login-inp{width:100%;background:var(--bg2);border:1px solid var(--bg4);border-radius:10px;color:var(--white);font-size:15px;font-family:'Inter',sans-serif;padding:14px 16px;margin-bottom:12px;outline:none;}
+.login-inp:focus{border-color:var(--lime);}
+.login-btn{width:100%;background:var(--lime);color:#111;border:none;border-radius:10px;font-size:14px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;padding:15px;cursor:pointer;font-family:'Inter',sans-serif;margin-top:4px;}
+.login-btn:disabled{opacity:.5;cursor:default;}
+.login-err{color:#ff5577;font-size:13px;min-height:18px;margin-top:12px;}
+.logout-btn{position:fixed;top:10px;right:12px;z-index:300;background:transparent;border:1px solid var(--bg4);color:var(--grey);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:5px 10px;border-radius:6px;cursor:pointer;font-family:'Inter',sans-serif;font-weight:600;display:none;}
+.logout-btn:hover{border-color:var(--white);color:var(--white);}
 .conf-ttl{font-family:'Anton',sans-serif;font-size:22px;margin-bottom:8px;}
 .conf-msg{font-size:13px;color:var(--grey);margin-bottom:22px;line-height:1.5;}
 .conf-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
@@ -476,6 +487,18 @@ svg.weight-chart{width:100%;overflow:visible;}
   </div>
 </div>
 
+<div class="login-ov" id="loginOv">
+  <div class="login-box">
+    <div class="login-logo">RECEP</div>
+    <div class="login-sub">Trainingsplan · Login</div>
+    <input class="login-inp" id="loginEmail" type="email" placeholder="E-Mail" autocomplete="username">
+    <input class="login-inp" id="loginPass" type="password" placeholder="Passwort" autocomplete="current-password">
+    <button class="login-btn" id="loginBtn">Einloggen</button>
+    <div class="login-err" id="loginErr"></div>
+  </div>
+</div>
+<button class="logout-btn" id="logoutBtn" onclick="sbLogout()">&#9099; Abmelden</button>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -484,27 +507,66 @@ svg.weight-chart{width:100%;overflow:visible;}
 // ═══════════════════════════════════════════════
 const SB_URL = 'https://xepdnsanjpsamhrilbaz.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhlcGRuc2FuanBzYW1ocmlsYmF6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3MzkxOTcsImV4cCI6MjA5MTMxNTE5N30.o8X7oPIaRxtAwROrnDmJ5MI4bbKf77XGJuzDnr6lf6Y';
-const USER_ID = 'recep';
 
-async function sbGet() {
+// ── Session / Login ──────────────────────────────
+let SESSION = null; // { access_token, refresh_token, user_id }
+
+function loadSession(){ try { return JSON.parse(localStorage.getItem('recep_session')||'null'); } catch(e){ return null; } }
+function saveSession(s){ SESSION = s; localStorage.setItem('recep_session', JSON.stringify(s)); }
+function clearSession(){ SESSION = null; localStorage.removeItem('recep_session'); }
+
+async function sbLogin(email, password){
+  const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: { 'apikey': SB_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  });
+  const d = await r.json();
+  if(!r.ok || !d.access_token){ throw new Error(d.error_description || d.msg || d.error || 'Login fehlgeschlagen'); }
+  saveSession({ access_token: d.access_token, refresh_token: d.refresh_token, user_id: d.user.id });
+  return SESSION;
+}
+
+async function sbRefresh(){
+  const s = loadSession();
+  if(!s || !s.refresh_token) return null;
   try {
-    const r = await fetch(`${SB_URL}/rest/v1/trainingsplan?user_id=eq.${USER_ID}&select=data`, {
-      headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY }
+    const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { 'apikey': SB_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: s.refresh_token })
     });
     const d = await r.json();
-    return d && d[0] ? d[0].data : null;
+    if(!r.ok || !d.access_token){ clearSession(); return null; }
+    saveSession({ access_token: d.access_token, refresh_token: d.refresh_token, user_id: d.user.id });
+    return SESSION;
+  } catch(e){ return null; }
+}
+
+function sbLogout(){ clearSession(); location.reload(); }
+
+// ── Daten lesen / schreiben (nur mit Login) ──────
+async function sbGet() {
+  if(!SESSION) return null;
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/trainingsplan?user_id=eq.${SESSION.user_id}&select=data&order=updated_at.desc&limit=1`, {
+      headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SESSION.access_token }
+    });
+    const d = await r.json();
+    return Array.isArray(d) && d[0] ? d[0].data : null;
   } catch(e) { return null; }
 }
 
 async function sbSet(data) {
+  if(!SESSION) return;
   try {
-    await fetch(`${SB_URL}/rest/v1/trainingsplan`, {
+    await fetch(`${SB_URL}/rest/v1/trainingsplan?on_conflict=user_id`, {
       method: 'POST',
       headers: {
-        'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY,
+        'apikey': SB_KEY, 'Authorization': 'Bearer ' + SESSION.access_token,
         'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates'
       },
-      body: JSON.stringify({ user_id: USER_ID, data, updated_at: new Date().toISOString() })
+      body: JSON.stringify({ user_id: SESSION.user_id, data, updated_at: new Date().toISOString() })
     });
   } catch(e) {}
 }
@@ -1412,7 +1474,46 @@ if (backup) {
   } catch(e) {}
 }
 // Then load from Supabase
-loadFromSupabase();
+
+// ── Login-Gate ───────────────────────────────────
+function showApp(){
+  document.getElementById('loginOv').style.display = 'none';
+  document.getElementById('logoutBtn').style.display = 'block';
+}
+function showLogin(){
+  document.getElementById('loginOv').style.display = 'flex';
+  document.getElementById('logoutBtn').style.display = 'none';
+  const eEl = document.getElementById('loginEmail'); if(eEl) eEl.focus();
+}
+
+async function doLogin(){
+  const btn = document.getElementById('loginBtn');
+  const err = document.getElementById('loginErr');
+  const email = document.getElementById('loginEmail').value.trim();
+  const pass = document.getElementById('loginPass').value;
+  err.textContent = '';
+  if(!email || !pass){ err.textContent = 'Bitte E-Mail und Passwort eingeben.'; return; }
+  btn.disabled = true; btn.textContent = 'Anmelden…';
+  try {
+    await sbLogin(email, pass);
+    showApp();
+    loadFromSupabase();
+  } catch(e){
+    err.textContent = 'Login fehlgeschlagen. E-Mail/Passwort prüfen.';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Einloggen';
+  }
+}
+
+document.getElementById('loginBtn').addEventListener('click', doLogin);
+document.getElementById('loginPass').addEventListener('keydown', function(e){ if(e.key==='Enter') doLogin(); });
+
+// Beim Start: bestehende Sitzung wiederherstellen
+(async function boot(){
+  const s = await sbRefresh();
+  if(s){ showApp(); loadFromSupabase(); }
+  else { showLogin(); }
+})();
 
 // ═══════════════════════════════════════════════
 // PWA
