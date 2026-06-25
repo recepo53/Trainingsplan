@@ -1966,6 +1966,18 @@ function saveAdd(){
   const k=DAYS[curDay].key;
   if(!S.exercises[k]) S.exercises[k]=[];
   S.exercises[k].push({id:uid(),name:n,desc:document.getElementById('addDesc').value.trim(),sets:parseInt(document.getElementById('addSets').value)||4,reps:document.getElementById('addReps').value.trim()||'10-12',restSec:Math.min(600,Math.max(15,parseInt(document.getElementById('addRest').value)||120)),muscle:guessMuscle(n)});
+  // Läuft gerade eine Session an genau diesem Tag? Dann die neue Übung sofort einreihen.
+  if(SES && DAYS[SES.day].key===k){
+    const newEx=S.exercises[k][S.exercises[k].length-1];
+    const prev=lastPrevLog(newEx.id);
+    const sets=Array.from({length:newEx.sets||4},(_,i)=>{
+      const ps=prev&&prev.sets&&prev.sets.length?(prev.sets[i]||prev.sets[prev.sets.length-1]):null;
+      return { weight: ps?String(ps.weight||''):'', reps: ps?String(ps.reps||''):'', type: ps?(ps.type||''):'', rpe:'', done:false, saved:null };
+    });
+    SES.ex[newEx.id]={sets};
+    SES.oldPR[newEx.id]=getPR(newEx.id);
+    saveSes();
+  }
   save(); closeAdd(); renderExercises(); toast('Hinzugefügt');
 }
 function closeConf(){ document.getElementById('confOv').classList.remove('open'); delId=null; }
